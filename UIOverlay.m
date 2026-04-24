@@ -247,7 +247,9 @@ static CGFloat const kPanelMaxHeight = 520.0;
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kPanelWidth, 60)];
     headerView.backgroundColor = kCardBgColor;
     headerView.layer.cornerRadius = 20;
-    headerView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    if (@available(iOS 11.0, *)) {
+        headerView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
+    }
     [self.panelView addSubview:headerView];
     
     // 标题
