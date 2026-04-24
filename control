@@ -1,0 +1,9 @@
+Package: com.tweak.mapreplacer
+Name: MapReplacer
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Map pak file replacer for ShadowTrackerExtra
+Maintainer: Developer
+Author: Developer
+Section: Tweaks
