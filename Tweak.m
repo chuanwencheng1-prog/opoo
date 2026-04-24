@@ -20,6 +20,7 @@ static BOOL sHasInitialized = NO;
 // 保存原始方法实现的指针
 static BOOL (*orig_AppDelegate_didFinishLaunching)(id self, SEL _cmd, UIApplication *app, NSDictionary *opts);
 static void (*orig_UIViewController_viewDidAppear)(id self, SEL _cmd, BOOL animated);
+static void (*orig_AppDelegate_didBecomeActive)(id self, SEL _cmd, UIApplication *app);
 
 // ============================================================
 // 插件初始化逻辑
@@ -77,6 +78,22 @@ static void hook_UIViewController_viewDidAppear(id self, SEL _cmd, BOOL animated
 }
 
 // ============================================================
+// Hook: AppDelegate - applicationDidBecomeActive: (前台恢复时确保悬浮窗可见)
+// ============================================================
+static void hook_AppDelegate_didBecomeActive(id self, SEL _cmd, UIApplication *app) {
+    if (orig_AppDelegate_didBecomeActive) {
+        orig_AppDelegate_didBecomeActive(self, _cmd, app);
+    }
+    
+    // 每次回到前台都确保悬浮按钮可见
+    if (sHasInitialized) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [[UIOverlay sharedOverlay] showFloatingButton];
+        });
+    }
+}
+
+// ============================================================
 // 安装 Hook 的辅助函数
 // ============================================================
 static void hookMethod(Class cls, SEL sel, void *replacement, void **original) {
@@ -119,6 +136,12 @@ static void mapreplacer_ctor(void) {
                        @selector(application:didFinishLaunchingWithOptions:),
                        (void *)hook_AppDelegate_didFinishLaunching,
                        (void **)&orig_AppDelegate_didFinishLaunching);
+            
+            // Hook applicationDidBecomeActive: 前台恢复时重新显示悬浮窗
+            hookMethod(appDelegateClass,
+                       @selector(applicationDidBecomeActive:),
+                       (void *)hook_AppDelegate_didBecomeActive,
+                       (void **)&orig_AppDelegate_didBecomeActive);
         } else {
             NSLog(@"[MapReplacer] AppDelegate 类未找到，尝试通过 UIViewController 注入");
         }

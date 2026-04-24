@@ -51,7 +51,4 @@ typedef NS_ENUM(NSInteger, MapType) {
 // 获取当前已替换的地图类型 (-1 表示未替换)
 - (NSInteger)currentReplacedMapType;
 
-@property (nonatomic, copy) void(^progressCallback)(float progress);
-@property (nonatomic, copy) void(^completionCallback)(BOOL success, NSError *error);
-
 @end

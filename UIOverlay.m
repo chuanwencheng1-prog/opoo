@@ -13,6 +13,8 @@
 #define kDividerColor    [UIColor colorWithRed:0.9 green:0.9 blue:0.92 alpha:1.0]
 
 static CGFloat const kFloatingBtnSize = 44.0;
+static CGFloat const kPanelWidth = 340.0;
+static CGFloat const kPanelMaxHeight = 520.0;
 
 // ============================================================
 // UIOverlay 实现
@@ -48,52 +50,102 @@ static CGFloat const kFloatingBtnSize = 44.0;
         _progressViews = [NSMutableDictionary dictionary];
         _statusLabels = [NSMutableDictionary dictionary];
         _isPanelVisible = NO;
+        
+        // 监听应用回到前台，确保悬浮窗始终可见
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(appDidBecomeActive)
+                                                     name:UIApplicationDidBecomeActiveNotification
+                                                   object:nil];
     }
     return self;
 }
 
+- (void)appDidBecomeActive {
+    // 每次回到前台都确保悬浮窗可见
+    if (self.overlayWindow) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self ensureWindowVisible];
+        });
+    }
+}
+
 #pragma mark - 悬浮按钮
+
+- (void)ensureWindowVisible {
+    if (!self.overlayWindow) return;
+    self.overlayWindow.hidden = NO;
+    [self.overlayWindow makeKeyAndVisible];
+    // 重新置顶
+    self.overlayWindow.windowLevel = UIWindowLevelAlert + 100;
+}
+
+- (void)createOverlayWindow {
+    // 销毁旧窗口（如果有）
+    if (self.overlayWindow) {
+        self.overlayWindow.hidden = YES;
+        self.overlayWindow.rootViewController = nil;
+        self.overlayWindow = nil;
+    }
+    
+    // 创建窗口
+    self.overlayWindow = [[UIWindow alloc] initWithFrame:CGRectMake(20, 200, kFloatingBtnSize, kFloatingBtnSize)];
+    self.overlayWindow.windowLevel = UIWindowLevelAlert + 100;
+    self.overlayWindow.backgroundColor = [UIColor clearColor];
+    self.overlayWindow.clipsToBounds = YES;
+    
+    // iOS 13+ 必须设置 rootViewController，否则窗口会被系统回收
+    UIViewController *rootVC = [[UIViewController alloc] init];
+    rootVC.view.backgroundColor = [UIColor clearColor];
+    rootVC.view.userInteractionEnabled = YES;
+    self.overlayWindow.rootViewController = rootVC;
+    
+    // 创建悬浮按钮
+    self.floatingButton = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kFloatingBtnSize, kFloatingBtnSize)];
+    self.floatingButton.backgroundColor = kPrimaryColor;
+    self.floatingButton.layer.cornerRadius = kFloatingBtnSize / 2.0;
+    self.floatingButton.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.floatingButton.layer.shadowOffset = CGSizeMake(0, 4);
+    self.floatingButton.layer.shadowOpacity = 0.3;
+    self.floatingButton.layer.shadowRadius = 8;
+    
+    UILabel *icon = [[UILabel alloc] initWithFrame:self.floatingButton.bounds];
+    icon.text = @"\U0001F5C2";
+    icon.font = [UIFont systemFontOfSize:20];
+    icon.textAlignment = NSTextAlignmentCenter;
+    icon.backgroundColor = [UIColor clearColor];
+    [self.floatingButton addSubview:icon];
+    
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(floatingButtonTapped)];
+    [self.floatingButton addGestureRecognizer:tap];
+    
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    [self.floatingButton addGestureRecognizer:pan];
+    
+    [rootVC.view addSubview:self.floatingButton];
+    
+    // 显示窗口
+    self.overlayWindow.hidden = NO;
+    [self.overlayWindow makeKeyAndVisible];
+    
+    NSLog(@"[MapReplacer] 悬浮窗已创建并显示");
+}
 
 - (void)showFloatingButton {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.overlayWindow) return;
+        // 窗口存在且可见 -> 直接确保置顶
+        if (self.overlayWindow && !self.overlayWindow.hidden && self.overlayWindow.rootViewController) {
+            [self ensureWindowVisible];
+            return;
+        }
         
-        self.overlayWindow = [[UIWindow alloc] initWithFrame:CGRectMake(20, 200, kFloatingBtnSize, kFloatingBtnSize)];
-        self.overlayWindow.windowLevel = UIWindowLevelAlert + 100;
-        self.overlayWindow.backgroundColor = [UIColor clearColor];
-        self.overlayWindow.hidden = NO;
-        
-        // 创建简约悬浮按钮
-        self.floatingButton = [[UIView alloc] initWithFrame:self.overlayWindow.bounds];
-        self.floatingButton.backgroundColor = kPrimaryColor;
-        self.floatingButton.layer.cornerRadius = kFloatingBtnSize / 2.0;
-        self.floatingButton.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.floatingButton.layer.shadowOffset = CGSizeMake(0, 4);
-        self.floatingButton.layer.shadowOpacity = 0.3;
-        self.floatingButton.layer.shadowRadius = 8;
-        
-        // 添加图标 (使用文字替代)
-        UILabel *icon = [[UILabel alloc] initWithFrame:self.floatingButton.bounds];
-        icon.text = @"🗂";
-        icon.font = [UIFont systemFontOfSize:20];
-        icon.textAlignment = NSTextAlignmentCenter;
-        icon.backgroundColor = [UIColor clearColor];
-        [self.floatingButton addSubview:icon];
-        
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(floatingButtonTapped)];
-        [self.floatingButton addGestureRecognizer:tap];
-        
-        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-        [self.floatingButton addGestureRecognizer:pan];
-        
-        [self.overlayWindow addSubview:self.floatingButton];
+        // 窗口不存在或已失效 -> 重新创建
+        [self createOverlayWindow];
     });
 }
 
 - (void)hideFloatingButton {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.overlayWindow setHidden:YES];
-        self.overlayWindow = nil;
+        self.overlayWindow.hidden = YES;
     });
 }
 
@@ -142,20 +194,13 @@ static CGFloat const kFloatingBtnSize = 44.0;
     [self.dimView addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hidePanel)]];
     [keyWindow addSubview:self.dimView];
     
-    // 主面板 - 适配横竖屏
-    CGRect screenBounds = keyWindow.bounds;
-    CGFloat screenWidth = screenBounds.size.width;
-    CGFloat screenHeight = screenBounds.size.height;
-    
-    // 根据屏幕方向调整面板宽度
-    BOOL isLandscape = screenWidth > screenHeight;
-    CGFloat panelWidth = isLandscape ? MIN(400.0, screenWidth * 0.6) : MIN(340.0, screenWidth * 0.9);
-    CGFloat panelHeight = isLandscape ? MIN(480.0, screenHeight * 0.8) : MIN(520.0, screenHeight * 0.7);
-    
-    CGFloat x = (screenWidth - panelWidth) / 2;
+    // 主面板
+    CGFloat screenHeight = keyWindow.bounds.size.height;
+    CGFloat panelHeight = MIN(kPanelMaxHeight, screenHeight * 0.7);
+    CGFloat x = (keyWindow.bounds.size.width - kPanelWidth) / 2;
     CGFloat y = (screenHeight - panelHeight) / 2;
     
-    self.panelView = [[UIView alloc] initWithFrame:CGRectMake(x, y, panelWidth, panelHeight)];
+    self.panelView = [[UIView alloc] initWithFrame:CGRectMake(x, y, kPanelWidth, panelHeight)];
     self.panelView.backgroundColor = kBgColor;
     self.panelView.layer.cornerRadius = 20;
     self.panelView.layer.shadowColor = [UIColor blackColor].CGColor;
@@ -195,23 +240,18 @@ static CGFloat const kFloatingBtnSize = 44.0;
 #pragma mark - 面板内容构建
 
 - (void)buildPanelContent {
-    CGFloat panelWidth = self.panelView.bounds.size.width;
     CGFloat padding = 20;
     CGFloat yOffset = 0;
     
     // ---- 标题栏 ----
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, panelWidth, 60)];
+    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kPanelWidth, 60)];
     headerView.backgroundColor = kCardBgColor;
     headerView.layer.cornerRadius = 20;
-    
-    // iOS 11+ 才支持 maskedCorners
-    if (@available(iOS 11.0, *)) {
-        headerView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
-    }
+    headerView.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
     [self.panelView addSubview:headerView];
     
     // 标题
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(padding, 15, panelWidth - 80, 30)];
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(padding, 15, kPanelWidth - 80, 30)];
     titleLabel.text = @"地图资源管理器";
     titleLabel.textColor = kTextPrimary;
     titleLabel.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
@@ -219,7 +259,7 @@ static CGFloat const kFloatingBtnSize = 44.0;
     
     // 关闭按钮
     UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    closeBtn.frame = CGRectMake(panelWidth - 50, 15, 35, 35);
+    closeBtn.frame = CGRectMake(kPanelWidth - 50, 15, 35, 35);
     closeBtn.backgroundColor = [UIColor colorWithRed:0.94 green:0.94 blue:0.96 alpha:1.0];
     closeBtn.layer.cornerRadius = 17.5;
     [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
@@ -231,11 +271,11 @@ static CGFloat const kFloatingBtnSize = 44.0;
     yOffset = 60;
     
     // ---- 状态信息 ----
-    UIView *infoView = [[UIView alloc] initWithFrame:CGRectMake(0, yOffset, panelWidth, 40)];
+    UIView *infoView = [[UIView alloc] initWithFrame:CGRectMake(0, yOffset, kPanelWidth, 40)];
     [self.panelView addSubview:infoView];
     
     NSString *paksDir = [[MapManager sharedManager] targetPaksDirectory];
-    UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(padding, 5, panelWidth - padding * 2, 30)];
+    UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(padding, 5, kPanelWidth - padding * 2, 30)];
     if (paksDir) {
         statusLabel.text = [NSString stringWithFormat:@"✓ 目标目录已就绪"];
         statusLabel.textColor = kSuccessColor;
@@ -249,13 +289,12 @@ static CGFloat const kFloatingBtnSize = 44.0;
     yOffset += 45;
     
     // ---- 地图列表 ----
-    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, yOffset, panelWidth, self.panelView.bounds.size.height - yOffset - 20)];
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, yOffset, kPanelWidth, kPanelMaxHeight - yOffset - 20)];
     self.scrollView.showsVerticalScrollIndicator = NO;
     [self.panelView addSubview:self.scrollView];
     
     CGFloat scrollY = 10;
     NSArray<MapInfo *> *maps = [[MapManager sharedManager] availableMaps];
-    NSInteger currentMap = [[MapManager sharedManager] currentReplacedMapType];
     
     for (NSInteger i = 0; i < maps.count; i++) {
         MapInfo *info = maps[i];
@@ -263,7 +302,7 @@ static CGFloat const kFloatingBtnSize = 44.0;
         CGFloat cardSpacing = 10;
         
         // 卡片容器
-        UIView *card = [[UIView alloc] initWithFrame:CGRectMake(padding, scrollY, panelWidth - padding * 2, cardHeight)];
+        UIView *card = [[UIView alloc] initWithFrame:CGRectMake(padding, scrollY, kPanelWidth - padding * 2, cardHeight)];
         card.backgroundColor = kCardBgColor;
         card.layer.cornerRadius = 12;
         card.layer.shadowColor = [UIColor blackColor].CGColor;
@@ -283,27 +322,21 @@ static CGFloat const kFloatingBtnSize = 44.0;
         [card addSubview:iconLabel];
         
         // 地图名称
-        UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(60, 12, panelWidth - padding * 2 - 75, 22)];
+        UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(60, 12, kPanelWidth - padding * 2 - 75, 22)];
         nameLabel.text = info.displayName;
         nameLabel.textColor = kTextPrimary;
         nameLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         [card addSubview:nameLabel];
         
         // 状态文本
-        UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(60, 34, panelWidth - padding * 2 - 75, 18)];
-        BOOL isCurrentMap = (currentMap == info.mapType);
-        if (isCurrentMap) {
-            descLabel.text = @"✓ 当前使用";
-            descLabel.textColor = kSuccessColor;
-        } else {
-            descLabel.text = @"点击下载";
-            descLabel.textColor = kTextSecondary;
-        }
+        UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(60, 34, kPanelWidth - padding * 2 - 75, 18)];
+        descLabel.text = @"点击下载并替换";
+        descLabel.textColor = kTextSecondary;
         descLabel.font = [UIFont systemFontOfSize:12];
         [card addSubview:descLabel];
         
         // 进度条
-        UIProgressView *progressView = [[UIProgressView alloc] initWithFrame:CGRectMake(12, cardHeight - 8, panelWidth - padding * 2 - 24, 4)];
+        UIProgressView *progressView = [[UIProgressView alloc] initWithFrame:CGRectMake(12, cardHeight - 8, kPanelWidth - padding * 2 - 24, 4)];
         progressView.progressTintColor = kPrimaryColor;
         progressView.trackTintColor = [UIColor colorWithRed:0.92 green:0.92 blue:0.94 alpha:1.0];
         progressView.hidden = YES;
@@ -311,7 +344,7 @@ static CGFloat const kFloatingBtnSize = 44.0;
         self.progressViews[@(info.mapType)] = progressView;
         
         // 状态标签
-        UILabel *stateLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, cardHeight - 22, panelWidth - padding * 2 - 24, 14)];
+        UILabel *stateLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, cardHeight - 22, kPanelWidth - padding * 2 - 24, 14)];
         stateLabel.textAlignment = NSTextAlignmentCenter;
         stateLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
         stateLabel.textColor = kTextSecondary;
@@ -319,23 +352,23 @@ static CGFloat const kFloatingBtnSize = 44.0;
         [card addSubview:stateLabel];
         self.statusLabels[@(info.mapType)] = stateLabel;
         
-        // 下载/替换按钮
+        // 下载/替换按钮 - 始终可点击，允许多次下载替换
         UIButton *actionBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-        actionBtn.frame = CGRectMake(panelWidth - padding * 2 - 70, 18, 58, 34);
-        actionBtn.backgroundColor = isCurrentMap ? kSuccessColor : kPrimaryColor;
+        actionBtn.frame = CGRectMake(kPanelWidth - padding * 2 - 70, 18, 58, 34);
+        actionBtn.backgroundColor = kPrimaryColor;
         actionBtn.layer.cornerRadius = 8;
         actionBtn.tag = info.mapType;
-        [actionBtn setTitle:isCurrentMap ? @"已应用" : @"下载" forState:UIControlStateNormal];
+        [actionBtn setTitle:@"下载" forState:UIControlStateNormal];
         [actionBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         actionBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-        actionBtn.enabled = !isCurrentMap;
+        actionBtn.enabled = YES;
         [actionBtn addTarget:self action:@selector(downloadButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:actionBtn];
         self.mapButtons[@(info.mapType)] = actionBtn;
         
         // 分割线（非最后一项）
         if (i < maps.count - 1) {
-            UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(padding, scrollY + cardHeight + cardSpacing/2 - 0.5, panelWidth - padding * 2, 1)];
+            UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(padding, scrollY + cardHeight + cardSpacing/2 - 0.5, kPanelWidth - padding * 2, 1)];
             divider.backgroundColor = kDividerColor;
             [self.scrollView addSubview:divider];
         }
@@ -343,7 +376,7 @@ static CGFloat const kFloatingBtnSize = 44.0;
         scrollY += cardHeight + cardSpacing;
     }
     
-    self.scrollView.contentSize = CGSizeMake(panelWidth, scrollY + 10);
+    self.scrollView.contentSize = CGSizeMake(kPanelWidth, scrollY + 10);
 }
 
 - (NSString *)iconForMapType:(MapType)type {
@@ -400,14 +433,34 @@ static CGFloat const kFloatingBtnSize = 44.0;
     } completion:^(BOOL success, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (success) {
-                // 下载完成并已自动替换                
-                stateLabel.text = @"✓ 已完成";
+                stateLabel.text = @"✓ 下载完成，正在替换...";
                 stateLabel.textColor = kSuccessColor;
-                sender.backgroundColor = kSuccessColor;
-                [sender setTitle:@"已应用" forState:UIControlStateNormal];
                 
-                // 刷新其他按钮                
-                [self refreshAllButtons];
+                // 自动替换
+                NSError *replaceError = nil;
+                BOOL replaceSuccess = [[MapManager sharedManager] replaceMapWithType:type error:&replaceError];
+                
+                if (replaceSuccess) {
+                    stateLabel.text = @"✓ 替换成功！";
+                    stateLabel.textColor = kSuccessColor;
+                    
+                    // 短暂显示成功状态后恢复按钮为可下载
+                    sender.backgroundColor = kSuccessColor;
+                    [sender setTitle:@"✓ 完成" forState:UIControlStateNormal];
+                    
+                    // 2秒后恢复按钮为可再次下载状态
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        sender.enabled = YES;
+                        sender.backgroundColor = kPrimaryColor;
+                        [sender setTitle:@"下载" forState:UIControlStateNormal];
+                    });
+                } else {
+                    stateLabel.text = [NSString stringWithFormat:@"✗ %@", replaceError.localizedDescription];
+                    stateLabel.textColor = [UIColor systemRedColor];
+                    sender.enabled = YES;
+                    sender.backgroundColor = kPrimaryColor;
+                    [sender setTitle:@"下载" forState:UIControlStateNormal];
+                }
             } else {
                 stateLabel.text = [NSString stringWithFormat:@"✗ 下载失败: %@", error.localizedDescription];
                 stateLabel.textColor = [UIColor systemRedColor];
@@ -425,15 +478,11 @@ static CGFloat const kFloatingBtnSize = 44.0;
 }
 
 - (void)refreshAllButtons {
-    NSInteger currentMap = [[MapManager sharedManager] currentReplacedMapType];
     for (NSNumber *key in self.mapButtons) {
         UIButton *btn = self.mapButtons[key];
-        MapType type = (MapType)[key integerValue];
-        BOOL isCurrent = (currentMap == type);
-        
-        btn.enabled = !isCurrent;
-        btn.backgroundColor = isCurrent ? kSuccessColor : kPrimaryColor;
-        [btn setTitle:isCurrent ? @"已应用" : @"下载" forState:UIControlStateNormal];
+        btn.enabled = YES;
+        btn.backgroundColor = kPrimaryColor;
+        [btn setTitle:@"下载" forState:UIControlStateNormal];
     }
 }
 
